@@ -98,6 +98,9 @@
   .empty-state { text-align: center; padding: 80px 0; color: var(--soft); }
   .empty-state .e-head { font-size: 17px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 
+  .log-head-row { display: flex; justify-content: space-between; align-items: flex-start; }
+  .log-delete { background: none; border: none; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--soft); cursor: pointer; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
+
   /* ── Toast ── */
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--ink); color: #fff; padding: 11px 20px; border-radius: var(--pill); font-size: 13px; font-weight: 600; opacity: 0; transition: all .2s; pointer-events: none; z-index: 99; white-space: nowrap; font-family: inherit; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -110,7 +113,10 @@
   <div class="screen active" id="s-main">
 
     <div class="top-row">
-      <div class="top-meta" id="top-meta">Week 1 · June</div>
+      <div>
+        <div class="top-meta" id="top-meta">Week 1 · June</div>
+        <div class="top-meta" id="top-date" style="margin-top:2px;"></div>
+      </div>
       <button class="ghost-btn" onclick="goLogs()">Past weeks →</button>
     </div>
 
@@ -226,10 +232,21 @@ function monthKey(d)    { return `${d.getFullYear()}-${d.getMonth()}`; }
 function eur(n)         { return '€' + Math.round(n).toLocaleString('en-IE'); }
 
 // ── Init ──
-(function init() {
+function renderToday() {
   const now = new Date();
   document.getElementById('top-meta').textContent =
     `Week ${weekOfMonth(now)} · ${now.toLocaleString('default',{month:'long'})}`;
+  document.getElementById('top-date').textContent = fmtShort(now);
+}
+function scheduleMidnightRefresh() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+  setTimeout(() => { renderToday(); scheduleMidnightRefresh(); }, next - now);
+}
+(function init() {
+  renderToday();
+  scheduleMidnightRefresh();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderToday(); });
   refreshMonthTotal(0);
 })();
 
@@ -286,7 +303,8 @@ function doSplit() {
   const wk  = weekOfMonth(now);
   const mk  = monthKey(now);
   logs = logs.filter(l => !(l.mk === mk && l.wk === wk));
-  logs.unshift({ pay, wk, mk, date: fmtShort(now),
+  logs.unshift({ id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
+    pay, wk, mk, date: fmtShort(now),
     mLabel: now.toLocaleString('default',{month:'long',year:'numeric'}),
     wed, misc, sept: SEPT,
     pockets: POCKETS.map(p=>({name:p.name, weekly: p.monthly/4}))
@@ -343,7 +361,10 @@ function goLogs() {
   }
   c.innerHTML = logs.map(l => `
     <div class="log-block">
-      <div class="log-week-label">Week ${l.wk} · ${l.mLabel}</div>
+      <div class="log-head-row">
+        <div class="log-week-label">Week ${l.wk} · ${l.mLabel}</div>
+        <button class="log-delete" onclick="deleteLog('${l.id}')">Delete</button>
+      </div>
       <div class="log-pay-line">${eur(l.pay)}</div>
       <div class="log-date-line">${l.date}</div>
       <div class="log-rows">
@@ -354,6 +375,13 @@ function goLogs() {
       </div>
     </div>
   `).join('');
+}
+function deleteLog(id) {
+  logs = logs.filter(l => l.id !== id);
+  persist();
+  goLogs();
+  refreshMonthTotal(parseFloat(document.getElementById('pay-input').value) || 0);
+  toast('Week deleted');
 }
 function goMain() {
   document.getElementById('s-logs').classList.remove('active');
