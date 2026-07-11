@@ -153,7 +153,7 @@
           </div>
           <div class="row-amount-edit">
             <span class="row-amount-sym wedding">€</span>
-            <input class="row-amount wedding row-amount-input" id="r-wedding" type="text" inputmode="decimal" onchange="editWedding(this.value)" />
+            <input class="row-amount wedding row-amount-input" id="r-wedding" type="text" inputmode="decimal" oninput="editWedding(this.value)" />
           </div>
         </div>
         <div class="list-row">
@@ -282,43 +282,16 @@ function onInput() {
 }
 
 // ── Split ──
-let curLeft = 0;       // leftover for the week currently on screen
-let curWed = 0, curMisc = 0;
-let wedManual = false; // true once user types a custom wedding amount this week
-let curLogId = null;   // id of the log entry currently shown, so edits can update it
+let curLeft = 0;
+let curPay  = 0;
+let curWed  = 0, curMisc = 0;
+let curLogId = null;
 
 function doSplit() {
   const pay = parseFloat(document.getElementById('pay-input').value) || 0;
   if (!pay) return;
-
-  const fixedW = POCKETS.reduce((s,p) => s + p.monthly/4, 0);
-  const left   = Math.max(0, pay - fixedW - SEPT);
-  curLeft = left;
-  wedManual = false;
-  const wed    = left * wSplit / 100;
-  const misc   = left * (100 - wSplit) / 100;
-  curWed = wed; curMisc = misc;
-
-  // Render results
-  document.getElementById('r-wedding').value = Math.round(wed);
-  document.getElementById('r-sept').textContent    = eur(SEPT);
-  document.getElementById('r-misc').textContent    = eur(misc);
-  document.getElementById('wedding-sub').innerHTML = `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
-  document.getElementById('misc-sub').textContent    = `${100-wSplit}% of what's left`;
-
-  const fl = document.getElementById('fixed-list');
-  fl.innerHTML = POCKETS.map(p => `
-    <div class="list-row">
-      <div class="row-left">
-        <div class="row-name">${p.name}</div>
-        <div class="row-sub">€${p.monthly}/month</div>
-      </div>
-      <div class="row-amount soft">${eur(p.monthly/4)}</div>
-    </div>
-  `).join('');
-
-  document.getElementById('results').style.display = 'block';
-  buildEditRows();
+  curPay = pay;
+  renderSplit(pay);
 
   // Save log
   const now = new Date();
@@ -330,7 +303,7 @@ function doSplit() {
   logs.unshift({ id: newId,
     pay, wk, mk, date: fmtShort(now),
     mLabel: now.toLocaleString('default',{month:'long',year:'numeric'}),
-    wed, misc, sept: SEPT,
+    wed: curWed, misc: curMisc, sept: SEPT,
     pockets: POCKETS.map(p=>({name:p.name, weekly: p.monthly/4}))
   });
   persist();
@@ -341,33 +314,68 @@ function doSplit() {
   toast('Split saved ✓');
 }
 
+function renderSplit(pay) {
+  const fixedW = POCKETS.reduce((s,p) => s + p.monthly/4, 0);
+  const left   = Math.max(0, pay - fixedW - SEPT);
+  curLeft = left;
+  curWed  = left * wSplit / 100;
+  curMisc = left * (100 - wSplit) / 100;
+
+  document.getElementById('r-wedding').value = Math.round(curWed);
+  document.getElementById('r-sept').textContent = eur(SEPT);
+  document.getElementById('r-misc').textContent = eur(curMisc);
+  document.getElementById('wedding-sub').innerHTML =
+    `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
+  document.getElementById('misc-sub').textContent = `${100-wSplit}% of what's left`;
+
+  document.getElementById('fixed-list').innerHTML = POCKETS.map(p => `
+    <div class="list-row">
+      <div class="row-left">
+        <div class="row-name">${p.name}</div>
+        <div class="row-sub">€${p.monthly}/month</div>
+      </div>
+      <div class="row-amount soft">${eur(p.monthly/4)}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('results').style.display = 'block';
+  buildEditRows();
+}
+
 // ── Edit ──
 function editWedding(v) {
   let wed = parseFloat(v) || 0;
   wed = Math.max(0, Math.min(curLeft, wed));
-  wedManual = true;
-  curWed = wed;
+  curWed  = wed;
   curMisc = curLeft - wed;
 
-  document.getElementById('r-wedding').value = Math.round(wed);
+  // don't overwrite input — user is still typing
   document.getElementById('r-misc').textContent = eur(curMisc);
-  document.getElementById('wedding-sub').innerHTML = `Set manually · <span class="wedding-reset" onclick="resetWedding()">reset to ${wSplit}%</span>`;
-  const pctLeft = curLeft > 0 ? Math.round((curMisc/curLeft)*100) : 0;
-  document.getElementById('misc-sub').textContent = `${pctLeft}% of what's left`;
+  const pctMisc = curLeft > 0 ? Math.round((curMisc / curLeft) * 100) : 0;
+  document.getElementById('wedding-sub').innerHTML =
+    `Set manually · <span class="wedding-reset" onclick="resetWedding()">reset to ${wSplit}%</span>`;
+  document.getElementById('misc-sub').textContent = `${pctMisc}% of what's left`;
 
   if (curLogId) {
     const log = logs.find(l => l.id === curLogId);
     if (log) { log.wed = curWed; log.misc = curMisc; persist(); }
   }
 }
+
 function resetWedding() {
-  const wed = curLeft * wSplit / 100;
-  const misc = curLeft * (100 - wSplit) / 100;
-  document.getElementById('r-wedding').value = Math.round(wed);
-  editWedding(wed); // reuses save + render path, then we restore the % label below
-  wedManual = false;
-  document.getElementById('wedding-sub').innerHTML = `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
-  document.getElementById('misc-sub').textContent = `${100-wSplit}% of what's left`;
+  curWed  = curLeft * wSplit / 100;
+  curMisc = curLeft * (100 - wSplit) / 100;
+
+  document.getElementById('r-wedding').value = Math.round(curWed);
+  document.getElementById('r-misc').textContent = eur(curMisc);
+  document.getElementById('wedding-sub').innerHTML =
+    `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
+  document.getElementById('misc-sub').textContent = `${100 - wSplit}% of what's left`;
+
+  if (curLogId) {
+    const log = logs.find(l => l.id === curLogId);
+    if (log) { log.wed = curWed; log.misc = curMisc; persist(); }
+  }
 }
 
 let editOpen = false;
@@ -395,14 +403,21 @@ function buildEditRows() {
 function updateP(i, v) {
   POCKETS[i].monthly = parseFloat(v) || 0;
   persist();
-  doSplit();
+  if (curPay) {
+    renderSplit(curPay);
+    if (curLogId) {
+      const log = logs.find(l => l.id === curLogId);
+      if (log) { log.wed = curWed; log.misc = curMisc;
+        log.pockets = POCKETS.map(p=>({name:p.name, weekly: p.monthly/4})); persist(); }
+    }
+  }
   toast('Updated');
 }
 function nudgeSplit(d) {
   wSplit = Math.min(95, Math.max(50, wSplit + d));
   document.getElementById('split-val').textContent = `${wSplit}%`;
   persist();
-  doSplit();
+  if (curPay) renderSplit(curPay);
 }
 
 // ── Logs ──
