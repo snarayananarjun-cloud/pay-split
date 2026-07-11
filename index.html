@@ -61,6 +61,11 @@
   .row-amount { font-size: 17px; font-weight: 700; }
   .row-amount.wedding { color: var(--green); font-size: 19px; }
   .row-amount.soft { color: var(--soft); }
+  .row-amount-edit { display: flex; align-items: baseline; gap: 1px; }
+  .row-amount-sym { font-size: 17px; font-weight: 700; }
+  .row-amount-sym.wedding { color: var(--green); }
+  .row-amount-input { background: none; border: none; outline: none; font-family: inherit; text-align: right; width: 76px; border-bottom: 1px dashed #B9D6BB; }
+  .wedding-reset { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
   /* ── Divider ── */
   .divider { height: 1px; background: var(--line); margin: 8px 0 32px; }
@@ -101,6 +106,11 @@
   .log-head-row { display: flex; justify-content: space-between; align-items: flex-start; }
   .log-delete { background: none; border: none; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--soft); cursor: pointer; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
 
+  .month-filter { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 28px; -ms-overflow-style: none; scrollbar-width: none; }
+  .month-filter::-webkit-scrollbar { display: none; }
+  .month-pill { flex: 0 0 auto; background: none; border: 1px solid var(--line); border-radius: var(--pill); padding: 7px 14px; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--soft); cursor: pointer; white-space: nowrap; }
+  .month-pill.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+
   /* ── Toast ── */
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--ink); color: #fff; padding: 11px 20px; border-radius: var(--pill); font-size: 13px; font-weight: 600; opacity: 0; transition: all .2s; pointer-events: none; z-index: 99; white-space: nowrap; font-family: inherit; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -139,9 +149,12 @@
         <div class="list-row">
           <div class="row-left">
             <div class="row-name">Wedding fund</div>
-            <div class="row-sub" id="wedding-sub">80% of what's left</div>
+            <div class="row-sub" id="wedding-sub">80% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span></div>
           </div>
-          <div class="row-amount wedding" id="r-wedding">€0</div>
+          <div class="row-amount-edit">
+            <span class="row-amount-sym wedding">€</span>
+            <input class="row-amount wedding row-amount-input" id="r-wedding" type="text" inputmode="decimal" onchange="editWedding(this.value)" />
+          </div>
         </div>
         <div class="list-row">
           <div class="row-left">
@@ -193,6 +206,7 @@
       <button class="back-tap" onclick="goMain()">←</button>
       <div class="logs-heading">Past weeks</div>
     </div>
+    <div class="month-filter" id="month-filter"></div>
     <div id="logs-list"></div>
   </div>
 
@@ -268,20 +282,28 @@ function onInput() {
 }
 
 // ── Split ──
+let curLeft = 0;       // leftover for the week currently on screen
+let curWed = 0, curMisc = 0;
+let wedManual = false; // true once user types a custom wedding amount this week
+let curLogId = null;   // id of the log entry currently shown, so edits can update it
+
 function doSplit() {
   const pay = parseFloat(document.getElementById('pay-input').value) || 0;
   if (!pay) return;
 
   const fixedW = POCKETS.reduce((s,p) => s + p.monthly/4, 0);
   const left   = Math.max(0, pay - fixedW - SEPT);
+  curLeft = left;
+  wedManual = false;
   const wed    = left * wSplit / 100;
   const misc   = left * (100 - wSplit) / 100;
+  curWed = wed; curMisc = misc;
 
   // Render results
-  document.getElementById('r-wedding').textContent = eur(wed);
+  document.getElementById('r-wedding').value = Math.round(wed);
   document.getElementById('r-sept').textContent    = eur(SEPT);
   document.getElementById('r-misc').textContent    = eur(misc);
-  document.getElementById('wedding-sub').textContent = `${wSplit}% of what's left`;
+  document.getElementById('wedding-sub').innerHTML = `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
   document.getElementById('misc-sub').textContent    = `${100-wSplit}% of what's left`;
 
   const fl = document.getElementById('fixed-list');
@@ -303,18 +325,51 @@ function doSplit() {
   const wk  = weekOfMonth(now);
   const mk  = monthKey(now);
   logs = logs.filter(l => !(l.mk === mk && l.wk === wk));
-  logs.unshift({ id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
+  const newId = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+  curLogId = newId;
+  logs.unshift({ id: newId,
     pay, wk, mk, date: fmtShort(now),
     mLabel: now.toLocaleString('default',{month:'long',year:'numeric'}),
     wed, misc, sept: SEPT,
     pockets: POCKETS.map(p=>({name:p.name, weekly: p.monthly/4}))
   });
   persist();
-  refreshMonthTotal(pay);
+  document.getElementById('pay-input').value = '';
+  document.getElementById('cta').disabled = true;
+  document.getElementById('cta').classList.remove('on');
+  refreshMonthTotal(0);
   toast('Split saved ✓');
 }
 
 // ── Edit ──
+function editWedding(v) {
+  let wed = parseFloat(v) || 0;
+  wed = Math.max(0, Math.min(curLeft, wed));
+  wedManual = true;
+  curWed = wed;
+  curMisc = curLeft - wed;
+
+  document.getElementById('r-wedding').value = Math.round(wed);
+  document.getElementById('r-misc').textContent = eur(curMisc);
+  document.getElementById('wedding-sub').innerHTML = `Set manually · <span class="wedding-reset" onclick="resetWedding()">reset to ${wSplit}%</span>`;
+  const pctLeft = curLeft > 0 ? Math.round((curMisc/curLeft)*100) : 0;
+  document.getElementById('misc-sub').textContent = `${pctLeft}% of what's left`;
+
+  if (curLogId) {
+    const log = logs.find(l => l.id === curLogId);
+    if (log) { log.wed = curWed; log.misc = curMisc; persist(); }
+  }
+}
+function resetWedding() {
+  const wed = curLeft * wSplit / 100;
+  const misc = curLeft * (100 - wSplit) / 100;
+  document.getElementById('r-wedding').value = Math.round(wed);
+  editWedding(wed); // reuses save + render path, then we restore the % label below
+  wedManual = false;
+  document.getElementById('wedding-sub').innerHTML = `${wSplit}% of what's left · <span class="wedding-reset" onclick="resetWedding()">reset</span>`;
+  document.getElementById('misc-sub').textContent = `${100-wSplit}% of what's left`;
+}
+
 let editOpen = false;
 function toggleEdit() {
   editOpen = !editOpen;
@@ -351,15 +406,54 @@ function nudgeSplit(d) {
 }
 
 // ── Logs ──
+let selectedMonth = null; // mk string, null = current month by default
+
 function goLogs() {
   document.getElementById('s-main').classList.remove('active');
   document.getElementById('s-logs').classList.add('active');
+
+  const now = new Date();
+  const currentMk = monthKey(now);
+
+  // If we last viewed a month that's no longer the current one, snap back
+  // to "current month" automatically once a new month actually starts.
+  const lastSeenMk = localStorage.getItem('ps2_last_mk');
+  if (lastSeenMk !== currentMk) {
+    selectedMonth = currentMk;
+    localStorage.setItem('ps2_last_mk', currentMk);
+  }
+  if (selectedMonth === null) selectedMonth = currentMk;
+
+  // Build the set of months to show pills for: every month with logs,
+  // plus the current month even if it's empty yet.
+  const mkSet = new Map(); // mk -> label
+  mkSet.set(currentMk, now.toLocaleString('default',{month:'long',year:'numeric'}));
+  logs.forEach(l => { if (!mkSet.has(l.mk)) mkSet.set(l.mk, l.mLabel); });
+  const sortedMks = Array.from(mkSet.keys()).sort().reverse();
+
+  const mf = document.getElementById('month-filter');
+  mf.innerHTML = sortedMks.map(mk => `
+    <button class="month-pill ${mk === selectedMonth ? 'active' : ''}" onclick="selectMonth('${mk}')">
+      ${mk === currentMk ? 'This month' : mkSet.get(mk).split(' ')[0]}
+    </button>
+  `).join('');
+
+  renderLogsList();
+}
+
+function selectMonth(mk) {
+  selectedMonth = mk;
+  goLogs();
+}
+
+function renderLogsList() {
   const c = document.getElementById('logs-list');
-  if (!logs.length) {
+  const filtered = logs.filter(l => l.mk === selectedMonth);
+  if (!filtered.length) {
     c.innerHTML = `<div class="empty-state"><div class="e-head">No weeks logged yet</div>Split your first pay and it'll appear here.</div>`;
     return;
   }
-  c.innerHTML = logs.map(l => `
+  c.innerHTML = filtered.map(l => `
     <div class="log-block">
       <div class="log-head-row">
         <div class="log-week-label">Week ${l.wk} · ${l.mLabel}</div>
